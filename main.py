@@ -10,16 +10,20 @@ import traceback
 from bs4 import BeautifulSoup as BS
 
 
+P_TIMEZONE = pytz.timezone(config.TIMEZONE)
+TIMEZONE_COMMON_NAME = config.TIMEZONE_COMMON_NAME
+
+
+# делает запрос на сайт синоптика
 r = requests.get('https://sinoptik.ua/погода-запорожье')
 html = BS(r.content, 'html.parser')
 bot = telebot.TeleBot(config.TOKEN)
 
 for el in html.select('#content'):
-    """Происходит захват необходимых данных на сайте синоптика"""
+    # Происходит захват необходимых данных на сайте синоптика
     t_min = el.select('.temperature .min')[0].text
     t_max = el.select('.temperature .max')[0].text
     text = el.select('.wDescription .description')[0].text
-    # print(t_min, t_max, text)
 
 
 @bot.message_handler(commands=["start"])
@@ -44,6 +48,7 @@ def help_command(message):
 
 @bot.message_handler(commands=['exchange'])
 def exchange_command(message):
+    # обработчик для отображеня меню выбора валюты и встроенную клавиатуру
     keyboard = telebot.types.InlineKeyboardMarkup()
     keyboard.row(
         telebot.types.InlineKeyboardButton('USD', callback_data='get-USD')
@@ -62,15 +67,25 @@ def exchange_command(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def iq_callback(query):
+    # передает объект CallbackQuery во вложеную функцию
     data = query.data
     if data.startswith('get-'):
         get_ex_callback(query)
+    else:
+        try:
+                if json.loads(data)['t'] == 'u':
+                    edit_message_callback(query)
+        except ValueError:
+            pass
+
 
 def get_ex_callback(query):
+    # убираем состояние загрузки бота после нажатия кнопки
     bot.answer_callback_query(query.id)
     send_exchange_result(query.message, query.data[4:])
 
 def send_exchange_result(message, ex_code):
+    # отправляем состояние ввода в чат, что бы бот показывал индикатор"набора текста", пока API банка получает запрос и получаем код валюты
     bot.send_chat_action(message.chat.id, 'typing')
     ex = pb.get_exchange(ex_code)
     bot.send_message(
@@ -80,6 +95,7 @@ def send_exchange_result(message, ex_code):
     )
 
 def get_update_keyboard(ex):
+    # вызываем 2 метода сериализатор валюты и кнопки клавиатуры
     keyboard = telebot.types.InlineKeyboardMarkup()
     keyboard.row(
         telebot.types.InlineKeyboardButton(
@@ -93,12 +109,13 @@ def get_update_keyboard(ex):
                 }
             }).replace(' ', '')
         ),
-        telebot.types.InlineKeyboardButton('Переслать', switch_inline_query=ex['ccy'])
+        telebot.types.InlineKeyboardButton('Поделиться', switch_inline_query=ex['ccy'])
     )
     return keyboard
 
 
 def serialize_ex(ex_json, diff=None):
+    # вызываем метод для получения параметра diff которому будет передаваться разница между курсами обмена
     result = '<b>' + ex_json['base_ccy'] + ' -> ' + ex_json['ccy'] + ':</b>\n\n' + \
              'Buy: ' + ex_json['buy']
     if diff:
@@ -119,19 +136,8 @@ def serialize_exchange_diff(diff):
     return result
 
 
-@bot.callback_query_handler(func=lambda call: True)
-def iq_callback(query):
-    data = query.data
-    if data.startswith('get-'):
-        get_ex_callback(query)
-    else:
-        try:
-            if json.loads(data)['t'] == 'u':
-                edit_message_callback(query)
-        except ValueError:
-            pass
-
 def edit_message_callback(query):
+    # загружаем текущий курс валюты, генерируем текст нового сообщения
     data = json.loads(query.data)['e']
     exchange_now = pb.get_exchange(data['c'])
     text = serialize_ex(
@@ -158,6 +164,7 @@ def edit_message_callback(query):
         )
 
 def get_ex_from_iq_data(exc_json):
+    # метод разбирающий json из callback_data
     return {
         'buy': exc_json['b'],
         'sale': exc_json['s']
@@ -165,19 +172,23 @@ def get_ex_from_iq_data(exc_json):
 
 
 def get_exchange_diff(last, now):
+    # метод получающщий сторое и новое значение курса валют и возвращающий разницу
     return {
         'sale_diff': float("%.6f" % (float(now['sale']) - float(last['sale']))),
         'buy_diff': float("%.6f" % (float(now['buy']) - float(last['buy'])))
     }
 
 def get_edited_signature():
-    return '<i>Updated ' + \
+    # генерирует подпись внизу текста "обновлено"
+    return '<i>Обновлено ' + \
            str(datetime.datetime.now(P_TIMEZONE).strftime('%H:%M:%S')) + \
            ' (' + TIMEZONE_COMMON_NAME + ')</i>'
+
+
+# @bot.message_handler(commands=['joke'])
 
 
 if __name__ == "__main__":
     bot.polling(none_stop=True)
 
-P_TIMEZONE = pytz.timezone(config.TIMEZONE)
-TIMEZONE_COMMON_NAME = config.TIMEZONE_COMMON_NAME
+
